@@ -11,16 +11,32 @@ import seaborn as sns
 from tensorflow.keras.models import load_model
 from huggingface_hub import hf_hub_download
 import os
+import warnings
 
-# Download NLTK punkt tokenizer
-nltk.download('punkt')
+# Suppress warnings
+warnings.filterwarnings("ignore")
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress TensorFlow logging
+
+# Download NLTK punkt tokenizer (only once at startup)
+nltk.download('punkt', quiet=True)
 
 # Set page config
 st.set_page_config(page_title="Fake News Detection", layout="wide")
 
-# Load all models and evaluation metrics
 @st.cache_resource
 def load_resources():
+    """Load all models and resources with caching"""
+    resources = {
+        'word2vec_model': None,
+        'models': {},
+        'accuracy_comparison': None,
+        'classification_reports': {},
+        'confusion_matrices': {},
+        'roc_data': {},
+        'le': LabelEncoder()
+    }
+    resources['le'].classes_ = np.array(['Fake', 'Real'])
+
     # Load Word2Vec model from Hugging Face
     try:
         model_path = hf_hub_download(
@@ -28,71 +44,87 @@ def load_resources():
             filename="word2vec.model",
             cache_dir="models"
         )
-        word2vec_model = Word2Vec.load(model_path)
-        st.success("Successfully loaded Word2Vec model from Hugging Face")
+        resources['word2vec_model'] = Word2Vec.load(model_path)
     except Exception as e:
         st.error(f"Failed to load Word2Vec model: {str(e)}")
-        word2vec_model = None
-    
+
+    # Model loading function with error handling
+    def load_model_file(filepath, model_name=""):
+        try:
+            with open(filepath, 'rb') as f:
+                return pickle.load(f)
+        except Exception as e:
+            st.error(f"Error loading {model_name}: {str(e)}")
+            return None
+
     # Load machine learning models
-    models = {}
+    model_files = {
+        "Logistic Regression": "Logistic Regression.pkl",
+        "Naive Bayes": "Naive Bayes.pkl",
+        "Random Forest": "Random Forest.pkl",
+        "Support Vector Machine": "SVC.pkl",
+        "XGBoost": "XGBOOST.pkl"
+    }
+    
+    for name, file in model_files.items():
+        resources['models'][name] = load_model_file(file, name)
+    
+    # Load Neural Network separately
     try:
-        models = {
-            "Logistic Regression": pickle.load(open("Logistic Regression.pkl", "rb")),
-            "Naive Bayes": pickle.load(open("Naive Bayes.pkl", "rb")),
-            "Random Forest": pickle.load(open("Random Forest.pkl", "rb")),
-            "Support Vector Machine": pickle.load(open("SVC.pkl", "rb")),
-            "XGBoost": pickle.load(open("XGBOOST.pkl", "rb")),
-            "Neural Network": load_model("Fakenews.h5")
-        }
+        resources['models']["Neural Network"] = load_model("Fakenews.h5")
     except Exception as e:
-        st.error(f"Error loading some models: {str(e)}")
+        st.error(f"Error loading Neural Network: {str(e)}")
 
     # Load evaluation metrics
-    accuracy_comparison = None
-    classification_reports = {}
-    confusion_matrices = {}
-    roc_data = {}
-    
-    try:
-        accuracy_comparison = pickle.load(open("accuracy_comparison_plot.pkl", "rb"))
-        
-        classification_reports = {
-            "KNN": pickle.load(open("classification_KNN.pkl", "rb")),
-            "Logistic Regression": pickle.load(open("classification_LR.pkl", "rb")),
-            "Naive Bayes": pickle.load(open("classification_NB.pkl", "rb")),
-            "Neural Network": pickle.load(open("classification_Neural.pkl", "rb")),
-            "Random Forest": pickle.load(open("classification_RF.pkl", "rb")),
-            "SVM": pickle.load(open("classification_svc.pkl", "rb")),
-            "XGBoost": pickle.load(open("classification_xgb.pkl", "rb"))
+    metrics = {
+        'accuracy_comparison': "accuracy_comparison_plot.pkl",
+        'classification_reports': {
+            "KNN": "classification_KNN.pkl",
+            "Logistic Regression": "classification_LR.pkl",
+            "Naive Bayes": "classification_NB.pkl",
+            "Neural Network": "classification_Neural.pkl",
+            "Random Forest": "classification_RF.pkl",
+            "SVM": "classification_svc.pkl",
+            "XGBoost": "classification_xgb.pkl"
+        },
+        'confusion_matrices': {
+            "KNN": "confusion_KNN.pkl",
+            "Logistic Regression": "confusion_LR.pkl",
+            "Naive Bayes": "confusion_NB.pkl",
+            "Neural Network": "confusion_Neural.pkl",
+            "Random Forest": "confusion_RF.pkl",
+            "SVM": "confusion_svc.pkl",
+            "XGBoost": "confusion_xgb.pkl"
+        },
+        'roc_data': {
+            "KNN": "roc_data_KNN.pkl",
+            "Logistic Regression": "roc_data_LR.pkl",
+            "Naive Bayes": "roc_data_NB.pkl",
+            "Random Forest": "roc_data_RF.pkl",
+            "Neural Network": "roc_data_neural.pkl",
+            "SVM": "roc_data_svc.pkl",
+            "XGBoost": "roc_data_xgb.pkl"
         }
-        
-        confusion_matrices = {
-            "KNN": pickle.load(open("confusion_KNN.pkl", "rb")),
-            "Logistic Regression": pickle.load(open("confusion_LR.pkl", "rb")),
-            "Naive Bayes": pickle.load(open("confusion_NB.pkl", "rb")),
-            "Neural Network": pickle.load(open("confusion_Neural.pkl", "rb")),
-            "Random Forest": pickle.load(open("confusion_RF.pkl", "rb")),
-            "SVM": pickle.load(open("confusion_svc.pkl", "rb")),
-            "XGBoost": pickle.load(open("confusion_xgb.pkl", "rb"))
-        }
-        
-        roc_data = {
-            "KNN": pickle.load(open("roc_data_KNN.pkl", "rb")),
-            "Logistic Regression": pickle.load(open("roc_data_LR.pkl", "rb")),
-            "Naive Bayes": pickle.load(open("roc_data_NB.pkl", "rb")),
-            "Random Forest": pickle.load(open("roc_data_RF.pkl", "rb")),
-            "Neural Network": pickle.load(open("roc_data_neural.pkl", "rb")),
-            "SVM": pickle.load(open("roc_data_svc.pkl", "rb")),
-            "XGBoost": pickle.load(open("roc_data_xgb.pkl", "rb"))
-        }
-    except Exception as e:
-        st.error(f"Error loading evaluation metrics: {str(e)}")
-    
-    le = LabelEncoder()
-    le.classes_ = np.array(['Fake', 'Real'])
-    
-    return word2vec_model, models, accuracy_comparison, classification_reports, confusion_matrices, roc_data, le
+    }
+
+    for metric_type, files in metrics.items():
+        if isinstance(files, dict):
+            for name, file in files.items():
+                loaded = load_model_file(file, f"{name} {metric_type}")
+                if loaded is not None:
+                    resources[metric_type][name] = loaded
+        else:
+            resources[metric_type] = load_model_file(files, metric_type)
+
+    return (
+        resources['word2vec_model'],
+        resources['models'],
+        resources['accuracy_comparison'],
+        resources['classification_reports'],
+        resources['confusion_matrices'],
+        resources['roc_data'],
+        resources['le']
+    )
 
 # Create models directory if it doesn't exist
 os.makedirs("models", exist_ok=True)
@@ -100,28 +132,58 @@ os.makedirs("models", exist_ok=True)
 # Load resources
 word2vec_model, models, accuracy_comparison, classification_reports, confusion_matrices, roc_data, le = load_resources()
 
-# Text preprocessing function
 def preprocess_text(text):
+    """Clean and tokenize text"""
     tokens = word_tokenize(text.lower())
-    tokens = [word for word in tokens if word.isalpha()]
-    return tokens
+    return [word for word in tokens if word.isalpha()]
 
-# Function to get sentence embeddings
 def get_sentence_embedding(sentence, model, vector_size=100):
+    """Convert sentence to embedding vector"""
     if model is None:
         st.error("Word2Vec model not loaded properly")
         return np.zeros(vector_size)
     
     try:
         embeddings = [model.wv[word] for word in sentence if word in model.wv]
-        if len(embeddings) == 0:
-            return np.zeros(vector_size)
-        return np.mean(embeddings, axis=0)
+        return np.mean(embeddings, axis=0) if embeddings else np.zeros(vector_size)
     except Exception as e:
         st.error(f"Error generating embeddings: {str(e)}")
         return np.zeros(vector_size)
 
-# Streamlit app
+def display_prediction_results(prediction, prediction_proba, model_name):
+    """Display classification results in a structured way"""
+    predicted_class = le.inverse_transform([prediction])[0]
+    
+    # Prediction header
+    col1, col2 = st.columns(2)
+    with col1:
+        if predicted_class == "Fake":
+            st.error(f"**Prediction:** {predicted_class} News")
+        else:
+            st.success(f"**Prediction:** {predicted_class} News")
+    with col2:
+        st.metric("Selected Model", model_name)
+    
+    # Confidence scores
+    fake_prob = prediction_proba[0] * 100
+    real_prob = prediction_proba[1] * 100
+    
+    st.write("### Confidence Scores")
+    cols = st.columns(2)
+    cols[0].metric("Fake Probability", f"{fake_prob:.2f}%")
+    cols[1].metric("Real Probability", f"{real_prob:.2f}%")
+    
+    # Confidence visualization
+    st.bar_chart(pd.DataFrame({
+        'Class': ['Fake', 'Real'],
+        'Probability': [fake_prob, real_prob]
+    }).set_index('Class'))
+    
+    st.info("""
+    **Note:** This is a machine learning model prediction and may not be 100% accurate. 
+    Use critical thinking when evaluating news sources.
+    """)
+
 def main():
     st.title("Fake News Detection System")
     
@@ -130,96 +192,43 @@ def main():
     
     with tab1:
         st.header("News Article Classifier")
-        st.write("""
-        Enter a news article text below to classify it as real or fake using different machine learning models.
-        """)
+        st.write("Enter a news article text below to classify it as real or fake using different machine learning models.")
         
-        # Input text
-        user_input = st.text_area("News Article Text:", height=200, key="input_text")
+        user_input = st.text_area("News Article Text:", height=200)
+        selected_model = st.selectbox("Select Model:", list(models.keys()))
         
-        # Model selection
-        selected_model = st.selectbox(
-            "Select Model:",
-            list(models.keys()),
-            index=0
-        )
-        
-        if st.button("Classify"):
-            if user_input:
-                with st.spinner("Processing..."):
-                    try:
-                        # Preprocess and vectorize the input
-                        tokens = preprocess_text(user_input)
-                        embedding = get_sentence_embedding(tokens, word2vec_model)
-                        
-                        if embedding is None:
-                            st.error("Failed to generate embeddings")
-                            return
-                            
-                        embedding = embedding.reshape(1, -1)
-                        
-                        # Make prediction
-                        if selected_model == "Neural Network":
-                            # Reshape for neural network
-                            embedding = embedding.reshape(embedding.shape[0], embedding.shape[1], 1)
-                            prediction_proba = models[selected_model].predict(embedding)[0]
-                            prediction = np.argmax(prediction_proba)
-                            prediction_proba = [prediction_proba[0], prediction_proba[1]]
-                        else:
-                            prediction = models[selected_model].predict(embedding)
-                            prediction_proba = models[selected_model].predict_proba(embedding)[0]
-                        
-                        # Display results
-                        st.subheader("Prediction Results")
-                        predicted_class = le.inverse_transform([prediction])[0]
-                        
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            if predicted_class == "Fake":
-                                st.error(f"**Prediction:** {predicted_class} News")
-                            else:
-                                st.success(f"**Prediction:** {predicted_class} News")
-                        
-                        with col2:
-                            st.metric("Selected Model", selected_model)
-                        
-                        st.write("### Confidence Scores")
-                        fake_prob = prediction_proba[0] * 100
-                        real_prob = prediction_proba[1] * 100
-                        
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.metric("Fake Probability", f"{fake_prob:.2f}%")
-                        with col2:
-                            st.metric("Real Probability", f"{real_prob:.2f}%")
-                        
-                        # Show confidence bar
-                        confidence_data = pd.DataFrame({
-                            'Class': ['Fake', 'Real'],
-                            'Probability': [fake_prob, real_prob]
-                        })
-                        
-                        st.bar_chart(confidence_data.set_index('Class'))
-                        
-                        st.write("""
-                        **Note:** This is a machine learning model prediction and may not be 100% accurate. 
-                        Use critical thinking when evaluating news sources.
-                        """)
-                    except Exception as e:
-                        st.error(f"An error occurred during classification: {str(e)}")
-            else:
-                st.warning("Please enter some text to classify.")
+        if st.button("Classify") and user_input:
+            with st.spinner("Processing..."):
+                try:
+                    tokens = preprocess_text(user_input)
+                    embedding = get_sentence_embedding(tokens, word2vec_model)
+                    
+                    if embedding is None:
+                        st.error("Failed to generate embeddings")
+                        return
+                    
+                    embedding = embedding.reshape(1, -1)
+                    
+                    if selected_model == "Neural Network":
+                        embedding = embedding.reshape(embedding.shape[0], embedding.shape[1], 1)
+                        prediction_proba = models[selected_model].predict(embedding)[0]
+                        prediction = np.argmax(prediction_proba)
+                        prediction_proba = [prediction_proba[0], prediction_proba[1]]
+                    else:
+                        model = models[selected_model]
+                        prediction = model.predict(embedding)[0]
+                        prediction_proba = model.predict_proba(embedding)[0]
+                    
+                    display_prediction_results(prediction, prediction_proba, selected_model)
+                except Exception as e:
+                    st.error(f"Classification error: {str(e)}")
     
     with tab2:
         st.header("Model Comparison")
-        st.write("Compare the performance of different models used in this system.")
-        
-        if accuracy_comparison is not None:
-            # Display accuracy comparison
+        if accuracy_comparison:
             st.subheader("Model Accuracy Comparison")
             st.pyplot(accuracy_comparison)
             
-            # Select model for detailed metrics
             model_for_details = st.selectbox(
                 "Select model to view detailed metrics:",
                 list(classification_reports.keys()),
@@ -227,40 +236,31 @@ def main():
             )
             
             col1, col2 = st.columns(2)
-            
             with col1:
                 st.subheader("Classification Report")
                 if model_for_details in classification_reports:
-                    st.table(pd.DataFrame(classification_reports[model_for_details]).transpose())
-                else:
-                    st.warning("Classification report not available for this model")
+                    st.dataframe(pd.DataFrame(classification_reports[model_for_details]).transpose())
             
             with col2:
                 st.subheader("Confusion Matrix")
                 if model_for_details in confusion_matrices:
                     fig, ax = plt.subplots()
-                    sns.heatmap(confusion_matrices[model_for_details], annot=True, fmt='d', cmap='Blues', ax=ax)
+                    sns.heatmap(confusion_matrices[model_for_details], 
+                               annot=True, fmt='d', cmap='Blues', ax=ax)
                     ax.set_xlabel('Predicted')
                     ax.set_ylabel('Actual')
                     st.pyplot(fig)
-                else:
-                    st.warning("Confusion matrix not available for this model")
             
-            # ROC Curve
             st.subheader("ROC Curve")
             if model_for_details in roc_data:
                 st.pyplot(roc_data[model_for_details])
-            else:
-                st.warning("ROC curve not available for this model")
         else:
             st.warning("Evaluation metrics not loaded properly")
     
     with tab3:
         st.header("About This Project")
-        st.write("""
+        st.markdown("""
         ### Fake News Detection System
-        
-        This application uses machine learning and deep learning models to classify news articles as real or fake.
         
         **Models Included:**
         - Logistic Regression
@@ -268,25 +268,14 @@ def main():
         - Random Forest
         - Support Vector Machine (SVM)
         - XGBoost
-        - Neural Network (Deep Learning)
-        
-        **Features:**
-        - Text classification using state-of-the-art models
-        - Model performance comparison
-        - Detailed evaluation metrics for each model
-        - Confidence scores for predictions
+        - Neural Network
         
         **How it works:**
-        1. The system preprocesses the input text (tokenization, lowercasing, etc.)
-        2. Converts the text to numerical features using Word2Vec embeddings
-        3. Uses the selected model to make a prediction
-        4. Returns the classification with confidence scores
+        1. Text preprocessing (tokenization, cleaning)
+        2. Word2Vec embedding conversion
+        3. Model prediction with confidence scores
         
-        The models were trained on a dataset of thousands of labeled real and fake news articles.
-        
-        **Word2Vec Model:**
-        - Loaded from Hugging Face Model Hub (HamzaNawaz17/FakeNewsDetectionModel)
-        - Automatically downloaded and cached on first run
+        **Note:** The Word2Vec model is loaded from [Hugging Face Hub](https://huggingface.co/HamzaNawaz17/FakeNewsDetectionModel).
         """)
 
 if __name__ == "__main__":
